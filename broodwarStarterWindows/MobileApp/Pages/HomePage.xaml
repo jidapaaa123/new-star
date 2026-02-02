@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.Pages.HomePage"
+             Title="Starcraft Bot Control">
+
+    <ScrollView>
+        <VerticalStackLayout Spacing="12" Padding="16" VerticalOptions="FillAndExpand">
+
+            <!-- Refresh Button -->
+            <Button 
+                Text="Refresh Game State"
+                Command="{Binding RefreshGameStateCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"
+                Margin="0,0,0,8"
+                IsEnabled="{Binding IsLoading, Converter={StaticResource InvertedBoolConverter}}"/>
+
+            <!-- Connection Status Section -->
+            <Frame BorderColor="#2196F3" CornerRadius="8" Padding="12" Margin="0,0,0,4">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Connection Status" FontSize="16" FontAttributes="Bold" TextColor="#2196F3"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Running" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding IsRunning}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="In Game" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding InGame}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Resources Section -->
+            <Frame BorderColor="#4CAF50" CornerRadius="8" Padding="12" Margin="0,0,0,4">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Resources" FontSize="16" FontAttributes="Bold" TextColor="#4CAF50"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Minerals" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Minerals}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Gas" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Gas}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Supply" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Supply, StringFormat='{0}/{1}'}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Workers" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Workers}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Strategy Section -->
+            <Frame BorderColor="#FF9800" CornerRadius="8" Padding="12" Margin="0,0,0,4">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Strategy" FontSize="16" FontAttributes="Bold" TextColor="#FF9800"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Strategy Name" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding StrategyName}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                            <Label Text="Paused" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding StrategyPaused}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                    <Label Text="{Binding BuildOrderIndex, StringFormat='Build Order: {0}/{1}'}" FontSize="12" TextColor="#666">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Build Order: "/>
+                                <Span Text="{Binding BuildOrderIndex}"/>
+                                <Span Text="/"/>
+                                <Span Text="{Binding BuildOrderCount}"/>
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Bases Section -->
+            <Frame BorderColor="#9C27B0" CornerRadius="8" Padding="12" Margin="0,0,0,4">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Bases" FontSize="16" FontAttributes="Bold" TextColor="#9C27B0"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Player Bases" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding PlayerBases}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Explored" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding ExploredBases}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Enemy Found" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding EnemyBasesFound}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Potential" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding TotalPotentialBases}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Units Section -->
+            <Frame BorderColor="#F44336" CornerRadius="8" Padding="12" Margin="0,0,0,4">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Units" FontSize="16" FontAttributes="Bold" TextColor="#F44336"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Total" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding TotalUnits}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Marines" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Marines}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Vultures" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Vultures}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Wraiths" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Wraiths}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="SCVs" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding Scvs}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                    <Label Text="{Binding IsScouting, StringFormat='Scout Active: {0}'}" FontSize="12" TextColor="#666"/>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Construction Section -->
+            <Frame BorderColor="#00BCD4" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="Construction" FontSize="16" FontAttributes="Bold" TextColor="#00BCD4"/>
+                    <HorizontalStackLayout Spacing="16">
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Pending Orders" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding PendingOrders}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Spacing="4">
+                            <Label Text="Worker Assigned" FontSize="12" TextColor="#666"/>
+                            <Label Text="{Binding HasWorkerAssigned}" FontSize="14" FontAttributes="Bold"/>
+                        </VerticalStackLayout>
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Command Buttons Section -->
+            <Label Text="Commands" FontSize="16" FontAttributes="Bold" Margin="0,8,0,8"/>
+            
+            <!-- Hello World -->
+            <Button 
+                Text="Say Hi"
+                Command="{Binding HelloWorldCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+            
+            <!-- Build Bunker at Chokepoint -->
+            <Button 
+                Text="Build Bunker at Chokepoint"
+                Command="{Binding BuildBunkerCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <!-- Build Supply Depot at Chokepoint -->
+            <Button 
+                Text="Build Supply Depot at Chokepoint"
+                Command="{Binding BuildSupplyDepotCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <!-- Toggle Strategy -->
+            <Button 
+                Text="Toggle Strategy"
+                Command="{Binding ToggleStrategyCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <!-- Attack an Enemy Base -->
+            <Button 
+                Text="Attack an Enemy Base"
+                Command="{Binding ToggleAttackEnemyBaseCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <!-- Perform a Scout -->
+            <Button 
+                Text="Perform a Scout"
+                Command="{Binding ScoutMapCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <!-- Toggle Pause Bot -->
+            <Button 
+                Text="Toggle Bot"
+                Command="{Binding TogglePauseBotCommand}"
+                Padding="10,12"
+                FontSize="14"
+                CornerRadius="6"/>
+
+            <Label 
+                Text="{Binding StatusMessage}"
+                FontSize="12"
+                TextColor="#666"
+                HorizontalTextAlignment="Center"
+                Margin="0,16,0,0"/>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
