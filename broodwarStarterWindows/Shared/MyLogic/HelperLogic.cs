@@ -14,6 +14,9 @@ namespace Shared.MyLogic
         /// <returns></returns>
         public static bool IsAvailable(IConstructionManager constructionManager, IMyUnit worker)
         {
+            // 1. If it's selected by the human, it's NOT available.
+            if (worker.UnderlyingUnit.IsSelected()) return false;
+
             return !(constructionManager.IsWorkerAssignedToConstruction(worker) || worker.IsConstructing() || worker.IsScouting());
         }
 

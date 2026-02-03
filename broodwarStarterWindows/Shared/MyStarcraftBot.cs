@@ -281,6 +281,10 @@ public class MyStarcraftBot : DefaultBWListener
 
         foreach (var u in _offenseTeam) 
         {
+            if (u.IsSelected())
+            {
+                continue;
+            }
             if (u.GetDistance(rallyPoint) > 32) // Only move if not already there
             {
                 u.Attack(rallyPoint);
