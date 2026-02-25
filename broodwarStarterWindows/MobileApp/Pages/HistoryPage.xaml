@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.Pages.HistoryPage"
+             Title="Match History">
+
+    <RefreshView Command="{Binding LoadMatchesCommand}" IsRefreshing="{Binding IsLoading}">
+        <VerticalStackLayout Spacing="12" Padding="16">
+
+            <Label Text="Completed Matches" FontSize="18" FontAttributes="Bold"/>
+
+            <CollectionView ItemsSource="{Binding Matches}" SelectionMode="Single" SelectionChangedCommand="{Binding MatchSelectedCommand}" SelectionChangedCommandParameter="{Binding SelectedItem, Source={RelativeSource Self}}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame BorderColor="#2196F3" CornerRadius="8" Padding="12" Margin="0,8">
+                            <VerticalStackLayout Spacing="8">
+                                <HorizontalStackLayout Spacing="16">
+                                    <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                        <Label Text="Date" FontSize="12" TextColor="#666"/>
+                                        <Label Text="{Binding StartTime, StringFormat='{0:g}'}" FontSize="14" FontAttributes="Bold"/>
+                                    </VerticalStackLayout>
+                                    <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                        <Label Text="Result" FontSize="12" TextColor="#666"/>
+                                        <Label Text="{Binding Result}" FontSize="14" FontAttributes="Bold" TextColor="{Binding Result, Converter={StaticResource WinLossColorConverter}}"/>
+                                    </VerticalStackLayout>
+                                </HorizontalStackLayout>
+                                <HorizontalStackLayout Spacing="16">
+                                    <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                        <Label Text="Duration" FontSize="12" TextColor="#666"/>
+                                        <Label Text="{Binding Duration, StringFormat='{0:hh\\:mm\\:ss}'}" FontSize="14"/>
+                                    </VerticalStackLayout>
+                                    <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                        <Label Text="Final Minerals" FontSize="12" TextColor="#666"/>
+                                        <Label Text="{Binding FinalMinerals}" FontSize="14"/>
+                                    </VerticalStackLayout>
+                                </HorizontalStackLayout>
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </RefreshView>
+
+</ContentPage>

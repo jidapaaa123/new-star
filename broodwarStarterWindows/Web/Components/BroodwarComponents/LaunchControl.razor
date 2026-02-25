@@ -96,13 +96,15 @@
     }
     else if (myStarcraftBot.InGame)
     {
-        <div class="text-center py-5">
-            <h2 class="fs-2 fw-bold text-success mb-3">Connected</h2>
-            <p class="text-muted">Bot is connected to StarCraft</p>            <div class="mt-4">
-                <button class="btn btn-danger px-4 py-2 fw-semibold shadow" @onclick="CloseGame">
-                    Close StarCraft Game and Windows
-                </button>
-            </div>        </div>
+         <div class="text-center py-5">
+             <h2 class="fs-2 fw-bold text-success mb-3">Connected</h2>
+             <p class="text-muted">Bot is connected to StarCraft</p>
+             <div class="mt-4">
+                 <button class="btn btn-danger px-4 py-2 fw-semibold shadow" @onclick="CloseGame">
+                     Close StarCraft Game and Windows
+                 </button>
+             </div>
+         </div>
     }
 </div>
 
@@ -157,17 +159,20 @@
     
     private void Refresh()
     {
-        if (myStarcraftBot.InGame)
-        {
-            _isLaunching = false;
-            _wasInGame = true;
-        }
-        else if (_wasInGame)
-        {
-            _wasInGame = false;
-            CloseGame();
-        }
-        InvokeAsync(StateHasChanged);
+         if (myStarcraftBot.InGame)
+         {
+             _isLaunching = false;
+             _wasInGame = true;
+             InvokeAsync(StateHasChanged);
+         }
+         else if (_wasInGame)
+         {
+             _wasInGame = false;
+             CloseGame().ContinueWith(_ =>
+             {
+                 InvokeAsync(StateHasChanged);
+             });
+         }
     }
 
     public void Dispose()
@@ -227,10 +232,9 @@
     private async Task StartLaunch()
     {
         preferencesService.SavePreferences(gamePreferences);
-
         _isLaunching = true;
         await InvokeAsync(StateHasChanged);
-        myStarcraftBot.Connect();
+        @* myStarcraftBot.Connect(); *@
 
 
         starCraftService.StartStarCraft(gamePreferences);
@@ -241,7 +245,7 @@
     {
         _isLaunching = true;
         await InvokeAsync(StateHasChanged);
-        myStarcraftBot.Connect();
+        @* myStarcraftBot.Connect(); *@
         starCraftService.StartStarCraft(gamePreferences with
         {
             AutoMenu = "OFF"
@@ -249,9 +253,8 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private void CloseGame()
+    private async Task CloseGame()
     {
-        myStarcraftBot.Disconnect();
         starCraftService.StopAndReset();
         _isLaunching = false;
     }

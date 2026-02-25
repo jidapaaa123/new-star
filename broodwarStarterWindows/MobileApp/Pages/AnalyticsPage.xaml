@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.Pages.AnalyticsPage"
+             Title="Analytics">
+
+    <RefreshView Command="{Binding LoadAnalyticsCommand}" IsRefreshing="{Binding IsLoading}">
+        <ScrollView>
+            <VerticalStackLayout Spacing="12" Padding="16" VerticalOptions="FillAndExpand">
+
+                <!-- Summary Stats -->
+                <Label Text="Summary Statistics" FontSize="18" FontAttributes="Bold"/>
+
+                <HorizontalStackLayout Spacing="12">
+                    <Frame BorderColor="#2196F3" CornerRadius="8" Padding="12" HorizontalOptions="FillAndExpand">
+                        <VerticalStackLayout Spacing="8" HorizontalOptions="Center">
+                            <Label Text="Total Matches" FontSize="12" TextColor="#666" HorizontalTextAlignment="Center"/>
+                            <Label Text="{Binding TotalMatches}" FontSize="20" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+
+                    <Frame BorderColor="#4CAF50" CornerRadius="8" Padding="12" HorizontalOptions="FillAndExpand">
+                        <VerticalStackLayout Spacing="8" HorizontalOptions="Center">
+                            <Label Text="Win Rate" FontSize="12" TextColor="#666" HorizontalTextAlignment="Center"/>
+                            <Label Text="{Binding WinRatePercentage, StringFormat='{0}%'}" FontSize="20" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                </HorizontalStackLayout>
+
+                <HorizontalStackLayout Spacing="12">
+                    <Frame BorderColor="#FF9800" CornerRadius="8" Padding="12" HorizontalOptions="FillAndExpand">
+                        <VerticalStackLayout Spacing="8" HorizontalOptions="Center">
+                            <Label Text="Avg Duration" FontSize="12" TextColor="#666" HorizontalTextAlignment="Center"/>
+                            <Label Text="{Binding AverageDuration, StringFormat='{0:mm\\:ss}'}" FontSize="20" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+
+                    <Frame BorderColor="#9C27B0" CornerRadius="8" Padding="12" HorizontalOptions="FillAndExpand">
+                        <VerticalStackLayout Spacing="8" HorizontalOptions="Center">
+                            <Label Text="Expansions" FontSize="12" TextColor="#666" HorizontalTextAlignment="Center"/>
+                            <Label Text="{Binding ExpansionRate, StringFormat='{0:P0}'}" FontSize="20" FontAttributes="Bold" HorizontalTextAlignment="Center"/>
+                        </VerticalStackLayout>
+                    </Frame>
+                </HorizontalStackLayout>
+
+                <!-- Win/Loss Chart -->
+                <Label Text="Win/Loss Distribution" FontSize="16" FontAttributes="Bold" Margin="0,12,0,0"/>
+                <Frame BorderColor="#E0E0E0" CornerRadius="8" Padding="12" HeightRequest="300">
+                    <Grid x:Name="WinLossChartContainer" HorizontalOptions="FillAndExpand" VerticalOptions="FillAndExpand"/>
+                </Frame>
+
+                <!-- Worker Trend Chart -->
+                <Label Text="Average Worker Count Trend" FontSize="16" FontAttributes="Bold" Margin="0,12,0,0"/>
+                <Frame BorderColor="#E0E0E0" CornerRadius="8" Padding="12" HeightRequest="300">
+                    <Grid x:Name="WorkerChartContainer" HorizontalOptions="FillAndExpand" VerticalOptions="FillAndExpand"/>
+                </Frame>
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+
+</ContentPage>

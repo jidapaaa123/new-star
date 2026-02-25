@@ -14,12 +14,7 @@ public class ConstructionOrder
 
 public class ConstructionManager : IConstructionManager
 {
-    public List<ConstructionOrder> PendingConstructionOrders { get; private set; } = new List<ConstructionOrder>();
-
-    public void Reset()
-    {
-        PendingConstructionOrders.Clear();
-    }
+    public ConstructionOrder? PendingConstructionOrder { get; private set; }
 
     /// <summary>
     /// Adds to PendingConstructionOrders and commands the worker to build.
@@ -29,7 +24,7 @@ public class ConstructionManager : IConstructionManager
     /// <param name="tilePosition"></param>
     public void RegisterOrder(UnitType type, IMyUnit worker, TilePosition tilePosition, bool isFromBuildOrder)
     {
-        PendingConstructionOrders.Add(new ConstructionOrder
+        var order = new ConstructionOrder
         {
             BuildingType = type,
             ParentUnit = null,
@@ -41,38 +36,69 @@ public class ConstructionManager : IConstructionManager
             },
             TilePosition = tilePosition,
             IsFromBuildOrder = isFromBuildOrder
-        });
+        };
+
+        RegisterOrder(order);
+    }
+
+    public void RegisterOrder(ConstructionOrder order)
+    {
+        IMyUnit? worker = order.Worker;
+        var type = order.BuildingType;
+        var tilePosition = order.TilePosition;
 
         if (worker.IsCarryingMaterial())
         {
             worker.ReturnCargo();
         }
 
+        PendingConstructionOrder = order;
         worker.Build(type, tilePosition);
+        worker.SetConstructionManagerStatus(true);
     }
 
-    public void RecalibrateWorker()
+    /// <summary>
+    /// Calls the PendingConstructionOrder's worker to build it
+    /// </summary>
+    public void RecalibrateWorker(IGameData gameData)
     {
-        if (PendingConstructionOrders.Count == 0)
+        if (PendingConstructionOrder is null)
             return;
 
-        var type = PendingConstructionOrders[0].BuildingType;
-        var worker = PendingConstructionOrders[0].Worker;
-        var tilePosition = PendingConstructionOrders[0].TilePosition;
-        worker.Build(type, tilePosition);
+        var type = PendingConstructionOrder.BuildingType;
+        var worker = PendingConstructionOrder.Worker;
+        var tilePosition = PendingConstructionOrder.TilePosition;
+
+        if (!gameData.IsExplored(tilePosition))
+        {
+            worker.Move(new Position(tilePosition));
+            return;
+        }
+
+        bool buildSuccess = worker.Build(type, tilePosition);
+        if (!buildSuccess)
+        {
+            // Log why it failed
+            System.Diagnostics.Debug.WriteLine(
+                $"Build failed: Worker.IsIdle={worker.IsIdle()}, " +
+                $"Pos={worker.GetPosition()}, " +
+                $"TargetTile={tilePosition}, " +
+                $"HasVision={worker.HasPath(new Position(tilePosition))}");
+        }
+        worker.SetConstructionManagerStatus(true);
     }
 
-    public ConstructionOrder RemoveWorkerConstructionOrder(IMyUnit worker)
+    public ConstructionOrder RemovePendingConstructionOrder()
     {
-        var order = OrderOfWorker(worker);
+        var order = PendingConstructionOrder;
         if (order == null)
-            throw new ArgumentException($"No construction order attached to Worker#{worker.GetID()}");
+            throw new ArgumentException($"No construction order in ConstructionManager");
+        var worker = order.Worker;
 
-        // RemoveAll works because a worker can only be assigned to one construction at a time
-        PendingConstructionOrders.RemoveAll(o => o == order);
+        PendingConstructionOrder = null;
+        worker.SetConstructionManagerStatus(false);
         return order;
     }
-
 
     /// <summary>
     /// Doesn't add to PendingConstructionOrders, just commands the parent unit to build the addon.
@@ -84,27 +110,11 @@ public class ConstructionManager : IConstructionManager
         parentUnit.BuildAddon(addonType);
     }
 
-    public int GetReservedMinerals() => PendingConstructionOrders.Sum(o => o.Costs.Minerals);
-    public int GetReservedGas() => PendingConstructionOrders.Sum(o => o.Costs.Gas);
+    public int GetReservedMinerals() => PendingConstructionOrder?.Costs.Minerals ?? 0;
+    public int GetReservedGas() => PendingConstructionOrder?.Costs.Gas ?? 0;
     public Materials GetReservedMaterials() => new Materials
     {
         Minerals = GetReservedMinerals(),
         Gas = GetReservedGas()
     };
-    public bool IsWorkerAssignedToConstruction(IMyUnit worker) => PendingConstructionOrders.Any(o => o.Worker?.GetID() == worker.GetID());
-    public int? GetPendingWorkerId() => PendingConstructionOrders.FirstOrDefault()?.Worker?.GetID();
-    public ConstructionOrder? OrderOfWorker(IMyUnit worker) => PendingConstructionOrders.FirstOrDefault(o => o.Worker?.GetID() == worker.GetID());
-
-    public ConstructionOrder? OrderOfAddonType(UnitType unitType) => PendingConstructionOrders.FirstOrDefault(o => o.BuildingType == unitType && o.ParentUnit != null);
-
-    public ConstructionOrder RemoveAddonConstructionOrder(UnitType buildingType)
-    {
-        var order = OrderOfAddonType(buildingType);
-        if (order == null)
-            throw new ArgumentException($"No construction order of type {buildingType}");
-
-        // RemoveAll works because a worker can only be assigned to one construction at a time
-        PendingConstructionOrders.RemoveAll(o => o == order);
-        return order;
-    }
 }

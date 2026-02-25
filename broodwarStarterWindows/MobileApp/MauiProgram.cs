@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using MobileApp.Services;
 using MobileApp.ViewModels;
+using MobileApp.Pages;
 
 namespace MobileApp
 {
@@ -20,8 +21,22 @@ namespace MobileApp
             // Register HttpClient
             builder.Services.AddSingleton(sp =>
                 new HttpClient { BaseAddress = new Uri("https://localhost:7138/api/bot/") });
+            
+            // Register Services
             builder.Services.AddSingleton<IBotControlService, BotControlService>();
-            builder.Services.AddSingleton<HomePageViewModel>();
+            builder.Services.AddSingleton<ICacheService, CacheService>();
+
+            // Register Pages
+            builder.Services.AddSingleton<DashboardPage>();
+            builder.Services.AddSingleton<HistoryPage>();
+            builder.Services.AddSingleton<AnalyticsPage>();
+            builder.Services.AddSingleton<EventsPage>();
+
+            // Register ViewModels
+            builder.Services.AddSingleton<DashboardPageViewModel>();
+            builder.Services.AddSingleton<HistoryPageViewModel>();
+            builder.Services.AddSingleton<AnalyticsPageViewModel>();
+            builder.Services.AddSingleton<EventsPageViewModel>();
 
 #if DEBUG
             builder.Logging.AddDebug();
@@ -31,3 +46,4 @@ namespace MobileApp
         }
     }
 }
+

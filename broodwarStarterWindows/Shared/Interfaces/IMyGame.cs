@@ -8,5 +8,7 @@ namespace Shared.Interfaces
         TilePosition GetBuildLocation(UnitType targetType, TilePosition desiredPosition, int maxRange);
         void SendText(string text);
         IMyPlayer Self();
+        IMyUnit? ClosestInstanceOfTo(List<IMyUnit> instances, IMyUnit to);
+        IPlayerData Enemy();
     }
 }

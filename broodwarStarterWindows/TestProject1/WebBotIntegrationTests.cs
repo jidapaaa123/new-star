@@ -62,16 +62,6 @@ public class WebBotIntegrationTests : IClassFixture<WebBotIntegrationTestFixture
     }
 
     [Fact]
-    public async Task GetStatus_Should_Return_ServiceUnavailable_When_Game_Is_Null()
-    {
-        // Act
-        var response = await _fixture.Client.GetAsync("api/bot/status");
-
-        // Assert - Documents that endpoint requires Game to be NOT NULL
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-    }
-
-    [Fact]
     public async Task GetStrategy_Should_Return_ServiceUnavailable_When_Game_Is_Null()
     {
         // Act
@@ -159,103 +149,34 @@ public class WebBotIntegrationTests : IClassFixture<WebBotIntegrationTestFixture
     }
 
     [Fact]
-    public async Task PostScoutMap_Should_Return_Ok()
+    public async Task SetStrategy_Should_Return_Ok_With_Valid_Strategy()
     {
+        // Arrange
+        var strategyRequest = new SetStrategyRequest { Strategy = Strategy.Aggressive };
+        var content = new StringContent(JsonSerializer.Serialize(strategyRequest), System.Text.Encoding.UTF8, "application/json");
+
         // Act
-        var response = await _fixture.Client.PostAsync("api/bot/scoutmap", null);
+        var response = await _fixture.Client.PutAsync("api/bot/strategy", content);
 
         // Assert
         response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        responseContent.ShouldContain("change strategy");
     }
 
     [Fact]
-    public async Task PostChokeBunker_Should_Return_Ok()
+    public async Task SetStrategy_Should_Return_BadRequest_When_Strategy_Is_Null()
     {
+        // Arrange
+        var strategyRequest = new SetStrategyRequest { Strategy = null };
+        var content = new StringContent(JsonSerializer.Serialize(strategyRequest), System.Text.Encoding.UTF8, "application/json");
+
         // Act
-        var response = await _fixture.Client.PostAsync("api/bot/chokebunker", null);
+        var response = await _fixture.Client.PutAsync("api/bot/strategy", content);
 
         // Assert
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
-    }
-
-    [Fact]
-    public async Task PostChokeDepot_Should_Return_Ok()
-    {
-        // Act
-        var response = await _fixture.Client.PostAsync("api/bot/chokedepot", null);
-
-        // Assert
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
-    }
-
-    [Fact]
-    public async Task Multiple_Status_Calls_Should_Return_Consistent_ServiceUnavailable()
-    {
-        // Act
-        var response1 = await _fixture.Client.GetAsync("api/bot/status");
-        var response2 = await _fixture.Client.GetAsync("api/bot/status");
-
-        // Assert - Consistent behavior when Game is null
-        response1.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-        response2.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-    }
-
-    [Theory]
-    [InlineData("api/bot/status")]
-    [InlineData("api/bot/strategy")]
-    [InlineData("api/bot/bases")]
-    [InlineData("api/bot/units")]
-    [InlineData("api/bot/construction")]
-    public async Task All_Get_Endpoints_Should_Return_ServiceUnavailable_When_Game_Is_Null(string endpoint)
-    {
-        // Act
-        var response = await _fixture.Client.GetAsync(endpoint);
-
-        // Assert - Documents that all these endpoints require Game to be NOT NULL
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-    }
-
-    [Theory]
-    [InlineData("api/bot/togglestrat")]
-    [InlineData("api/bot/toggleattackenemybase")]
-    [InlineData("api/bot/scoutmap")]
-    [InlineData("api/bot/chokebunker")]
-    [InlineData("api/bot/chokedepot")]
-    public async Task All_Post_Endpoints_Should_Return_Ok(string endpoint)
-    {
-        // Act
-        var response = await _fixture.Client.PostAsync(endpoint, null);
-
-        // Assert
-        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
-    }
-
-    [Fact]
-    public async Task Bot_Instance_Should_Be_Singleton_Across_Requests()
-    {
-        // Act
-        var response1 = await _fixture.Client.GetAsync("api/bot/status");
-        var botInstance1 = _fixture.Bot;
-        
-        var response2 = await _fixture.Client.GetAsync("api/bot/status");
-        var botInstance2 = _fixture.Bot;
-
-        // Assert
-        response1.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-        response2.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-        ReferenceEquals(botInstance1, botInstance2).ShouldBe(true);
-    }
-
-    [Fact]
-    public async Task EnqueueCommand_Via_Api_Should_Be_Processed()
-    {
-        // Act
-        var initialResponse = await _fixture.Client.GetAsync("api/bot/status");
-        await _fixture.Client.PostAsync("api/bot/togglestrat", null);
-        var afterCommandResponse = await _fixture.Client.GetAsync("api/bot/status");
-
-        // Assert - Both return 503 since Game is null, but commands are still queued successfully
-        initialResponse.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
-        afterCommandResponse.StatusCode.ShouldBe(System.Net.HttpStatusCode.ServiceUnavailable);
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.BadRequest);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        responseContent.ShouldContain("cannot be null");
     }
 }

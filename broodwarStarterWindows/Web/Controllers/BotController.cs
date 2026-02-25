@@ -11,11 +11,15 @@ namespace Web.Controllers
     [Route("api/[controller]")]
     public class BotController : Controller
     {
-        private readonly MyStarcraftBot _myStarcraftBot;
+    private readonly MyStarcraftBot _myStarcraftBot;
+        private readonly IGameEventRepository _gameEventRepository;
+        private readonly IMatchRepository _matchRepository;
 
-        public BotController(MyStarcraftBot myStarcraftBot)
+        public BotController(MyStarcraftBot myStarcraftBot, IGameEventRepository gameEventRepository, IMatchRepository matchRepository)
         {
             _myStarcraftBot = myStarcraftBot;
+            _gameEventRepository = gameEventRepository;
+            _matchRepository = matchRepository;
         }
 
         [HttpGet]
@@ -31,20 +35,14 @@ namespace Web.Controllers
         }
 
         [HttpGet("status")]
-        public ActionResult<GameStatusDto> GetGameStatus()
+        public ActionResult<BotStatusDto> GetBotStatus()
         {
-            if (_myStarcraftBot.Game == null)
-                return StatusCode(503, new { message = "Game not connected" });
-
-            return Ok(new GameStatusDto
+            return Ok(new BotStatusDto
             {
-                IsRunning = _myStarcraftBot.IsRunning,
-                InGame = _myStarcraftBot.InGame,
-                Supply = _myStarcraftBot.PlayerAdapter?.GetSupplyUsed() ?? 0,
-                SupplyTotal = _myStarcraftBot.PlayerAdapter?.SupplyTotal() ?? 0,
-                Minerals = _myStarcraftBot.PlayerAdapter?.Minerals() ?? 0,
-                Gas = _myStarcraftBot.PlayerAdapter?.Gas() ?? 0,
-                Workers = _myStarcraftBot.PlayerAdapter?.GetWorkerUnits().Count ?? 0
+                IsConnected = _myStarcraftBot.IsRunning,
+                IsInGame = _myStarcraftBot.InGame,
+                CurrentFrame = _myStarcraftBot.Game?.GetFrameCount() ?? 0,
+                GameTime = _myStarcraftBot.Game != null ? TimeSpan.FromSeconds(_myStarcraftBot.Game.GetFrameCount() / 24.0) : TimeSpan.Zero
             });
         }
 
@@ -72,7 +70,7 @@ namespace Web.Controllers
             if (_myStarcraftBot.Game == null)
                 return StatusCode(503, new { message = "Game not connected" });
 
-            var playerBases = _myStarcraftBot.PlayerAdapter?.GetBases() ?? new List<IMyUnit>();
+            var playerBases = _myStarcraftBot.MyPlayer?.GetBases() ?? new List<IMyUnit>();
             var potentialBases = _myStarcraftBot.PotentialBases ?? new List<ScoutLocation>();
 
             return Ok(new BasesDto
@@ -90,7 +88,7 @@ namespace Web.Controllers
             if (_myStarcraftBot.Game == null)
                 return StatusCode(503, new { message = "Game not connected" });
 
-            var allUnits = _myStarcraftBot.PlayerAdapter?.GetUnits() ?? new List<IMyUnit>();
+            var allUnits = _myStarcraftBot.MyPlayer?.GetUnits() ?? new List<IMyUnit>();
             var marines = allUnits.Count(u => u.GetUnitType() == UnitType.Terran_Marine);
             var vultures = allUnits.Count(u => u.GetUnitType() == UnitType.Terran_Vulture);
             var wraiths = allUnits.Count(u => u.GetUnitType() == UnitType.Terran_Wraith);
@@ -103,7 +101,7 @@ namespace Web.Controllers
                 Vultures = vultures,
                 Wraiths = wraiths,
                 SCVs = scvs,
-                IsScouting = _myStarcraftBot.ScoutUnit != null
+                IsScouting = _myStarcraftBot.ScoutingManager?.ScoutUnit != null
             });
         }
 
@@ -115,8 +113,7 @@ namespace Web.Controllers
 
             return Ok(new ConstructionDto
             {
-                PendingOrders = _myStarcraftBot.ConstructionManager.PendingConstructionOrders.Count,
-                HasWorkerAssigned = _myStarcraftBot.ConstructionManager.GetPendingWorkerId() != null
+                HasWorkerAssigned = _myStarcraftBot.ConstructionManager.PendingConstructionOrder?.Worker != null
             });
         }
     
@@ -151,6 +148,22 @@ namespace Web.Controllers
             return Ok("Command to ToggleStrategy sent to bot.");
         }
 
+        [HttpPut("strategy")]
+        public ActionResult SetStrategy([FromBody] SetStrategyRequest request)
+        {
+            if (request?.Strategy == null)
+            {
+                return BadRequest("Strategy cannot be null");
+            }
+
+            _myStarcraftBot.EnqueueCommand(new BotCommand()
+            {
+                Type = BotCommandType.ChangeStrategy,
+                StrategyType = request.Strategy
+            });
+            return Ok($"Command to change strategy to {request.Strategy} sent to bot.");
+        }
+
         [HttpPost("toggleattackenemybase")]
         public ActionResult AttackEnemyBase()
         {
@@ -180,17 +193,49 @@ namespace Web.Controllers
             });
             return Ok("Command to TogglePauseBot sent to bot.");
         }
-    }
 
-    public class GameStatusDto
-    {
-        public bool IsRunning { get; set; }
-        public bool InGame { get; set; }
-        public int Supply { get; set; }
-        public int SupplyTotal { get; set; }
-        public int Minerals { get; set; }
-        public int Gas { get; set; }
-        public int Workers { get; set; }
+        [HttpPost("expand")]
+        public ActionResult Expand()
+        {
+            _myStarcraftBot.EnqueueCommand(new BotCommand()
+            {
+                Type = BotCommandType.Expand,
+            });
+            return Ok("Command to Expand sent to bot.");
+        }
+
+        [HttpGet("matches/{id}/events")]
+        public async Task<ActionResult<List<GameEvent>>> GetMatchEvents(int id)
+        {
+            try
+            {
+                var events = await _gameEventRepository.GetGameEventsByMatchAsync(id);
+                return Ok(events);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Error retrieving events: {ex.Message}" });
+            }
+        }
+
+        [HttpGet("matches/latest")]
+        public async Task<ActionResult<Match>> GetLatestMatch()
+        {
+            try
+            {
+                var allMatches = await _matchRepository.GetAllMatchesAsync();
+                var latestMatch = allMatches.OrderByDescending(m => m.StartTime).FirstOrDefault();
+                if (latestMatch == null)
+                {
+                    return NotFound(new { message = "No matches found" });
+                }
+                return Ok(latestMatch);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = $"Error retrieving latest match: {ex.Message}" });
+            }
+        }
     }
 
     public class StrategyDto
@@ -221,7 +266,21 @@ namespace Web.Controllers
 
     public class ConstructionDto
     {
-        public int PendingOrders { get; set; }
         public bool HasWorkerAssigned { get; set; }
+    }
+
+    public class BotStatusDto
+    {
+        public bool IsConnected { get; set; }
+        public bool IsInGame { get; set; }
+        public int CurrentFrame { get; set; }
+        public TimeSpan GameTime { get; set; }
+    }
+
+    public class SetStrategyRequest
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("strategy")]
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+        public Strategy? Strategy { get; set; }
     }
 }

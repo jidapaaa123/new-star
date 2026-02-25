@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.Pages.EventsPage"
+             Title="Game Events">
+
+    <ContentPage.Resources>
+        <Style x:Key="EventFrame" TargetType="Frame">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="Margin" Value="0,4,0,4" />
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=White, Dark=DarkGrey}" />
+            <Setter Property="BorderColor" Value="Transparent" />
+        </Style>
+        
+        <Style x:Key="EventBadge" TargetType="Label">
+            <Setter Property="FontSize" Value="10" />
+            <Setter Property="FontAttributes" Value="Bold" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="TextColor" Value="White" />
+        </Style>
+    </ContentPage.Resources>
+
+    <RefreshView Command="{Binding RefreshEventsCommand}" IsRefreshing="{Binding IsLoading}">
+        <VerticalStackLayout BackgroundColor="{AppThemeBinding Light=White, Dark=Black}" Spacing="12" Padding="16">
+            
+            <!-- Header with refresh button -->
+            <HorizontalStackLayout Spacing="8" Margin="0,0,0,8">
+                <Label Text="Recent Events" FontSize="18" FontAttributes="Bold" VerticalOptions="Center" HorizontalOptions="FillAndExpand" />
+                <Button Text="??" 
+                        Command="{Binding RefreshEventsCommand}"
+                        Padding="8,4" 
+                        FontSize="14"
+                        CornerRadius="4"
+                        WidthRequest="40" />
+            </HorizontalStackLayout>
+
+            <!-- No events message -->
+            <Label Text="No events recorded yet" 
+                   FontSize="14" 
+                   TextColor="#999"
+                   HorizontalOptions="Center"
+                   VerticalOptions="CenterAndExpand"
+                   IsVisible="{Binding HasNoEvents}" />
+
+            <!-- Events list -->
+            <CollectionView ItemsSource="{Binding Events}" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Style="{StaticResource EventFrame}" HasShadow="True">
+                            <VerticalStackLayout Spacing="6">
+                                <!-- Event header with type and time -->
+                                <HorizontalStackLayout Spacing="8" VerticalOptions="Start">
+                                    <Label Text="{Binding EventType}" 
+                                           Style="{StaticResource EventBadge}"
+                                           TextColor="White"
+                                           BackgroundColor="{Binding EventColor}"
+                                           HorizontalOptions="Start" />
+                                    <Label Text="{Binding FormattedTime}" 
+                                           FontSize="11" 
+                                           TextColor="#666"
+                                           VerticalOptions="Center"
+                                           HorizontalOptions="FillAndExpand" />
+                                </HorizontalStackLayout>
+
+                                <!-- Event description -->
+                                <Label Text="{Binding Description}" 
+                                       FontSize="13" 
+                                       LineBreakMode="WordWrap" />
+                            </VerticalStackLayout>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </RefreshView>
+
+</ContentPage>

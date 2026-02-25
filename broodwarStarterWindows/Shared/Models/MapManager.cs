@@ -2,72 +2,52 @@
 using BWAPI.NET;
 using BWEM;
 using BWEM.NET;
+using Shared.Interfaces;
+using Shared.Wrappers;
 using System;
 using System.Linq;
 
-public class MapManager
+public class MapManager : IMapManager
 {
-    private readonly Game _game;
-    private readonly Map _map;
+    public IGameData GameData { get; private set; }
+    private Map? _map = null;
     private int _frameCount = 0;
 
     public bool IsInitialized { get; set; } = false;
-    public MapManager(Game game)
+    public MapManager(IGameData gameData)
     {
-        _game = game;
-        _map = new Map(game);
-
-        _map.Initialize();
-
-        IsInitialized = true;
+        GameData = gameData;
     }
 
-    public void CompleteInitialization()
+    private void ensureMapInitialized()
     {
-        if (IsInitialized)
-            return;
+        if (IsInitialized || _map != null) return;
 
-        // Add a frame counter to allow more time for BWEM to initialize
-        if (_frameCount < 10)
-        {
-            _frameCount++;
-            return;
-        }
+        if (GameData.Game == null)
+            throw new InvalidOperationException("Cannot initialize map without a Game instance");
 
-        // Only attempt initialization if the game has basic data available
-        if (_game.Self().GetUnits().Count == 0 && _game.GetNeutralUnits().Count == 0)
-            return;
-
-        try
-        {
-            _map.FindBasesForStartingLocations();
-            _map.EnableAutomaticPathAnalysis();
-            IsInitialized = true;
-        }
-        catch (NullReferenceException ex)
-        {
-            // If initialization fails, we'll retry on next call
-            Console.WriteLine("Map initialization failed, will retry: " + ex.Message);
-        }
+        _map = new Map(GameData.Game);
+        _map.Initialize();
+        IsInitialized = true;
     }
 
     public List<TilePosition> GetScoutingTargets()
     {
-        TilePosition myStart = _game.Self().GetStartLocation();
+        TilePosition myStart = GameData.Self().GetStartLocation();
 
         // Get all possible starting locations from the game engine
         // and filter out our own base.
-        return _game.GetStartLocations()
+        return GameData.GetStartLocations()
             .Where(loc => loc != myStart)
             .ToList();
     }
 
     public ChokePoint? GetMainChokepoint()
     {
-        CompleteInitialization();
+        ensureMapInitialized();
 
         // 1. Get the Area of our starting location (The Main)
-        TilePosition startTile = _game.Self().GetStartLocation();
+        TilePosition startTile = GameData.Self().GetStartLocation();
         Area mainArea = _map.GetArea(startTile);
 
         // 2. Find the Natural expansion
@@ -90,10 +70,9 @@ public class MapManager
 
     public Area? GetNaturalArea()
     {
-        while (!IsInitialized)
-            CompleteInitialization();
+        ensureMapInitialized();
 
-        TilePosition startTile = _game.Self().GetStartLocation();
+        TilePosition startTile = GameData.Self().GetStartLocation();
 
         // Find the base that is NOT our start location but is very close
         var naturalBase = _map.Bases
@@ -102,5 +81,29 @@ public class MapManager
             .FirstOrDefault();
 
         return naturalBase?.Area;
+    }
+
+    public TilePosition? GetNaturalExpansion()
+    {
+        ensureMapInitialized();
+
+        TilePosition startTile = GameData.Self().GetStartLocation();
+
+        // Find the closest base by ground distance, not as-the-crow-flies
+        var naturalBase = GameData.GetStartLocations()
+            .Where(b => b!= startTile)
+            .OrderBy(b => 
+                {
+                    _map.GetPath(startTile.ToPosition(), b.ToPosition(), out int groundDistance);
+                    return groundDistance;
+                })
+            .FirstOrDefault();
+
+        return naturalBase;
+    }
+
+    public static MapManager CreateForTesting(IGameData gameData)
+    {
+        return new MapManager(gameData);
     }
 }

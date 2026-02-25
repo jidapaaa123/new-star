@@ -1,4 +1,5 @@
 ﻿using BWAPI.NET;
+using Shared.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,7 +14,8 @@ namespace Shared.Models
         public string Text { get; set; }        // For DrawText
         public UnitType TargetUnit { get; set; } // For "Build"
         public TilePosition TilePosition { get; set; } // For "Build"
-        public int MaxRange { get; set; } // For "Build"   
+        public int MaxRange { get; set; } // For "Build"
+        public Strategy? StrategyType { get; set; } // For ChangeStrategy
     }
 
     public enum BotCommandType
@@ -21,8 +23,10 @@ namespace Shared.Models
         ManageBunkerProduction,
         ManageSupplyDepotProduction,
         ToggleStrategy,
+        ChangeStrategy,
         ScoutMap,
         ToggleAttackEnemyBase,
-        TogglePauseBot
+        TogglePauseBot,
+        Expand
     }
 }

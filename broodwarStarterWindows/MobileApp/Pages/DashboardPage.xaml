@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="MobileApp.Pages.DashboardPage"
+             Title="Dashboard">
+
+    <ContentPage.Resources>
+        <Style x:Key="InfoFrame" TargetType="Frame">
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12" />
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=White, Dark=DarkGrey}" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="BackgroundColor" Value="Brown" />
+        </Style>
+    </ContentPage.Resources>
+    
+    <RefreshView Command="{Binding RefreshGameStateCommand}" IsRefreshing="{Binding IsLoading}">
+        <ScrollView>
+            <VerticalStackLayout 
+                BackgroundColor="{AppThemeBinding Light=White, Dark=Black}"
+                Spacing="12" Padding="16" VerticalOptions="FillAndExpand">
+
+                <!-- Connection Status -->
+                <Frame BorderColor="#2196F3" Style="{StaticResource InfoFrame}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Connection Status" FontSize="16" FontAttributes="Bold" TextColor="#2196F3"/>
+                        <HorizontalStackLayout Spacing="16">
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="Running" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding IsRunning}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4">
+                                <Label Text="In Game" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding InGame}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Frame>
+
+                <!-- Resources -->
+                <Frame BorderColor="#4CAF50" Style="{StaticResource InfoFrame}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Resources" FontSize="16" FontAttributes="Bold" TextColor="#4CAF50"/>
+                        <HorizontalStackLayout Spacing="12">
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Minerals" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding Minerals}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Gas" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding Gas}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Supply" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding Supply, StringFormat='{0}/{1}'}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Frame>
+
+                <!-- Units -->
+                <Frame BorderColor="#F44336" Style="{StaticResource InfoFrame}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Units" FontSize="16" FontAttributes="Bold" TextColor="#F44336"/>
+                        <HorizontalStackLayout Spacing="12">
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Workers" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding Workers}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Military" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding MilitaryCount}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Frame>
+
+                <!-- Game Status -->
+                <Frame BorderColor="#FF9800" Style="{StaticResource InfoFrame}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label Text="Game Status" FontSize="16" FontAttributes="Bold" TextColor="#FF9800"/>
+                        <HorizontalStackLayout Spacing="12">
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Strategy" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding CurrentStrategy}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Expanded" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding HasExpanded}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                            <VerticalStackLayout Spacing="4" HorizontalOptions="FillAndExpand">
+                                <Label Text="Enemy Scouted" FontSize="12" TextColor="#666"/>
+                                <Label Text="{Binding EnemyScouted}" FontSize="14" FontAttributes="Bold"/>
+                            </VerticalStackLayout>
+                        </HorizontalStackLayout>
+                    </VerticalStackLayout>
+                </Frame>
+
+                <!-- Quick Actions -->
+                <Label Text="Quick Actions" FontSize="16" FontAttributes="Bold" Margin="0,8,0,8"/>
+                
+                <Button 
+                    Text="Expand to Natural"
+                    Command="{Binding ExpandCommand}"
+                    Padding="10,12"
+                    FontSize="14"
+                    CornerRadius="6"/>
+
+                <Button 
+                    Text="Scout Map"
+                    Command="{Binding ScoutMapCommand}"
+                    Padding="10,12"
+                    FontSize="14"
+                    CornerRadius="6"/>
+
+                <!-- Strategy Selection -->
+                <Label Text="Select Strategy" FontSize="16" FontAttributes="Bold" Margin="0,8,0,8"/>
+                
+                <HorizontalStackLayout Spacing="8">
+                    <Picker 
+                        x:Name="StrategyPicker"
+                        ItemsSource="{Binding AvailableStrategies}"
+                        SelectedItem="{Binding SelectedStrategy}"
+                        HorizontalOptions="FillAndExpand"
+                        VerticalOptions="Center"
+                        BackgroundColor="{AppThemeBinding Light=White, Dark=DarkGrey}"
+                        TextColor="{AppThemeBinding Light=Black, Dark=White}"/>
+
+                    <Button 
+                        Text="Set Strategy"
+                        Command="{Binding SetStrategyCommand}"
+                        Padding="10,12"
+                        FontSize="12"
+                        CornerRadius="6"
+                        WidthRequest="100"/>
+
+                    <Label 
+                        Text="{Binding ConfirmationMessage}"
+                        IsVisible="{Binding ShowConfirmation}"
+                        FontSize="12"
+                        TextColor="Green"
+                        VerticalOptions="Center"
+                        FontAttributes="Bold"/>
+                </HorizontalStackLayout>
+
+                <Button 
+                    Text="Toggle Strategy"
+                    Command="{Binding ToggleStrategyCommand}"
+                    Padding="10,12"
+                    FontSize="14"
+                    CornerRadius="6"/>
+
+                <Button 
+                    Text="Toggle Dark Mode"
+                    Command="{Binding ToggleThemeCommand}"
+                    Padding="10,12"
+                    FontSize="14"
+                    CornerRadius="6"/>
+
+            </VerticalStackLayout>
+        </ScrollView>
+    </RefreshView>
+
+</ContentPage>

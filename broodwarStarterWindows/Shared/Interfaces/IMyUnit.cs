@@ -40,7 +40,13 @@ namespace Shared.Interfaces
         void SetScouting();
         void UnsetScouting();
         bool IsScouting();
+        bool IsSelected();
+        void SetConstructionManagerStatus(bool v);
+        bool IsInConstructionManager();
+        void Research(TechType type);
+        bool IsCompleted();
+        bool HasPath(Position position);
 
-        BWAPI.NET.Unit UnderlyingUnit { get; }
+        BWAPI.NET.Unit Unit { get; }
     }
 }

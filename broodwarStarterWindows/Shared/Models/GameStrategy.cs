@@ -8,14 +8,6 @@ using System.Threading.Tasks;
 
 namespace Shared.Models
 {
-    public class BuildOrderItem
-    {
-        public UnitType UnitType { get; set; }
-        public int SCVThreshold { get; set; } = 0;
-        public int MarineThreshold { get; set; } = 0;
-        public int VultureThreshold { get; set; } = 0;
-
-    }
     public class GameStrategy
     {
         public IMyGame GameAdapter { get; set; }
@@ -23,13 +15,12 @@ namespace Shared.Models
         public string Description { get; set; }
         public bool IdleWorkersSentToGatherMaterials { get; set; }
         public int GasGatherConfig { get; set; }
-        public int SCVConfig { get; set; }
-        public int MarineConfig { get; set; }
-        public int VultureConfig { get; private set; }
+        public int MinimumMineralGatherConfig { get; set; }
 
 
         public TilePosition InitialPosition { get; set; }
         public int MaxRange { get; set; }
+        public Strategy CurrentStrategy { get; private set; }
 
         /// <summary>
         /// Build order. Order matters. Can specify supply count to trigger each step. (or leave null)
@@ -41,52 +32,127 @@ namespace Shared.Models
         public int CurrentBuildOrderIndex { get; set; } = 0;
         public bool WorkerAssignedToCurrentStep { get; set; } = false;
         public bool IsPaused { get; set; }
+        
+        /// <summary>
+        /// Tracks units/buildings completed from the build order to avoid duplicates when switching strategies
+        /// </summary>
+        public Dictionary<UnitType, int> CompletedBuildOrderUnits { get; set; } = new();
 
         public GameStrategy(IMyGame game)
         {
             GameAdapter = game;
-            Description = "Default Strategy: Research Cloaking Fields, Produce Wraiths and Science Vessels";
-            Name = "Default";
-            IdleWorkersSentToGatherMaterials = true;
-            BuildOrderItems = new()
-            {
-                new() { UnitType = UnitType.Terran_Supply_Depot, SCVThreshold = 9, MarineThreshold = 0 },
-                new() { UnitType = UnitType.Terran_Barracks,     SCVThreshold = 11, MarineThreshold = 0 },
-                new() { UnitType = UnitType.Terran_Refinery,     SCVThreshold = 13, MarineThreshold = 2 },
-
-                new() { UnitType = UnitType.Terran_Supply_Depot, SCVThreshold = 13, MarineThreshold = 2 },
-
-                // Mid-game: Balancing tech with military unit counts
-                new() { UnitType = UnitType.Terran_Engineering_Bay, SCVThreshold = 15, MarineThreshold = 5 },
-                new() { UnitType = UnitType.Terran_Factory,         SCVThreshold = 16, MarineThreshold = 8 },
-    
-                new() { UnitType = UnitType.Terran_Supply_Depot, SCVThreshold = 16, MarineThreshold = 8 },
-    
-                // Late-tech: Pushing to the 15/15 requirement
-                new() { UnitType = UnitType.Terran_Starport,        SCVThreshold = 17, MarineThreshold = 8 },
-                new() { UnitType = UnitType.Terran_Control_Tower,   SCVThreshold = 18, MarineThreshold = 8, VultureThreshold = 1 },
-
-                new() { UnitType = UnitType.Terran_Supply_Depot, SCVThreshold = 18, MarineThreshold = 8, VultureThreshold = 1 },
-
-                new() { UnitType = UnitType.Terran_Science_Facility, SCVThreshold = 20, MarineThreshold = 8, VultureThreshold = 1 },
-
-                new() { UnitType = UnitType.Terran_Supply_Depot, SCVThreshold = 20, MarineThreshold = 8, VultureThreshold = 1 },
-
-            };
-
             var bases = game.Self().GetBases();
             InitialPosition = bases[0].GetPosition().ToTilePosition();
             MaxRange = 64;
-            GasGatherConfig = 3;
-
-            SCVConfig = 7;
-            MarineConfig = 0;
-            VultureConfig = 0;
             IsPaused = false;
+
+            // Configure default strategy
+            ConfigureStrategySettings(Strategy.Default);
+            BuildOrderItems = StaticGameInfo.GetDefaultBuildOrder();
+        }
+
+        private void ConfigureStrategySettings(Strategy strategyType)
+        {
+            CurrentStrategy = strategyType;
+            
+            switch (strategyType)
+            {
+                case Strategy.Aggressive:
+                    Name = "Aggressive";
+                    Description = "Aggressive Strategy: Rush with early military";
+                    IdleWorkersSentToGatherMaterials = true;
+                    GasGatherConfig = 2;      // Less gas, focus on military
+                    MinimumMineralGatherConfig = 3;
+                    break;
+
+                case Strategy.Economic:
+                    Name = "Economic";
+                    Description = "Economic Strategy: Focus on economy and expansion";
+                    IdleWorkersSentToGatherMaterials = true;
+                    GasGatherConfig = 4;      // More gas for tech and expansion
+                    MinimumMineralGatherConfig = 8;
+                    break;
+
+                case Strategy.Defensive:
+                    Name = "Defensive";
+                    Description = "Defensive Strategy: Build defenses and tech up";
+                    IdleWorkersSentToGatherMaterials = true;
+                    GasGatherConfig = 3;      // Balanced gas for tech
+                    MinimumMineralGatherConfig = 5;
+                    break;
+
+                case Strategy.Default:
+                default:
+                    Name = "Default";
+                    Description = "Default Strategy: Research Cloaking Fields, Produce Wraiths and Science Vessels";
+                    IdleWorkersSentToGatherMaterials = true;
+                    GasGatherConfig = 3;
+                    MinimumMineralGatherConfig = 5;
+                    break;
+            }
+        }
+
+        public void ChangeStrategy(Strategy name)
+        { 
+            var newOrder = name switch
+            {
+                Strategy.Aggressive => StaticGameInfo.GetAggressiveBuildOrder(),
+                Strategy.Defensive => StaticGameInfo.GetDefensiveBuildOrder(),
+                Strategy.Economic => StaticGameInfo.GetEconomicBuildOrder(),
+                Strategy.Default => StaticGameInfo.GetDefaultBuildOrder(),
+                _ => throw new ArgumentException("Invalid strategy name", nameof(name))
+            };
+
+            BuildOrderItems = newOrder;
+            ConfigureStrategySettings(name);
+            
+            // Find the first item in new build order we haven't completed yet
+            CurrentBuildOrderIndex = FindNextUncompletedStep();
+            WorkerAssignedToCurrentStep = false;
+        }
+
+        private int FindNextUncompletedStep()
+        {
+            // Create a working copy of completed units
+            var remainingUnits = new Dictionary<UnitType, int>(CompletedBuildOrderUnits);
+            
+            for (int i = 0; i < BuildOrderItems.Count; i++)
+            {
+                var item = BuildOrderItems[i];
+                
+                // Check if we have a completed unit of this type to "consume"
+                if (remainingUnits.TryGetValue(item.UnitType, out int count) && count > 0)
+                {
+                    remainingUnits[item.UnitType]--;
+                }
+                else
+                {
+                    // This is the first item we haven't built yet
+                    return i;
+                }
+            }
+            
+            // All items completed
+            return BuildOrderItems.Count;
         }
 
         public void CompletedBuildOrderStep()
         {
+            if (CurrentBuildOrderIndex < BuildOrderItems.Count)
+            {
+                var completedUnit = BuildOrderItems[CurrentBuildOrderIndex].UnitType;
+                
+                // Track that we completed this unit
+                if (CompletedBuildOrderUnits.ContainsKey(completedUnit))
+                {
+                    CompletedBuildOrderUnits[completedUnit]++;
+                }
+                else
+                {
+                    CompletedBuildOrderUnits[completedUnit] = 1;
+                }
+            }
+            
             CurrentBuildOrderIndex++;
             WorkerAssignedToCurrentStep = false;
         }
@@ -95,10 +161,100 @@ namespace Shared.Models
         {
             WorkerAssignedToCurrentStep = true;
             var currentBuildOrderStep = BuildOrderItems[CurrentBuildOrderIndex];
+        }
 
-            SCVConfig = currentBuildOrderStep.SCVThreshold;
-            MarineConfig = currentBuildOrderStep.MarineThreshold;
-            VultureConfig = currentBuildOrderStep.VultureThreshold;
+        public Dictionary<UnitType, int>? GetCurrentUnitThresholds()
+        {
+            try
+            {
+                return BuildOrderItems[CurrentBuildOrderIndex].UnitThreshold;
+
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the next uncompleted build order item, skipping over any items that have already been completed.
+        /// </summary>
+        /// <returns>The next BuildOrderItem to complete, or null if the build order is complete.</returns>
+        public BuildOrderItem? GetCurrentBuildOrderItem()
+        {
+            // Find the next item we haven't completed yet
+            var nextUncompletedIndex = FindNextUncompletedStep();
+            
+            if (nextUncompletedIndex >= BuildOrderItems.Count)
+                return null;
+
+            // Update the index if it's behind
+            CurrentBuildOrderIndex = nextUncompletedIndex;
+            return BuildOrderItems[CurrentBuildOrderIndex];
+        }
+
+        /// <summary>
+        /// Gets the item at the current build order index without checking for completed steps.
+        /// Used for initialization and special cases.
+        /// </summary>
+        private BuildOrderItem? GetCurrentBuildOrderItemDirect()
+        {
+            if (CurrentBuildOrderIndex >= BuildOrderItems.Count)
+                return null;
+
+            return BuildOrderItems[CurrentBuildOrderIndex];
+        }
+
+        /// <summary>
+        /// Checks if the build order is complete.
+        /// </summary>
+        /// <returns>True if all build order items have been completed.</returns>
+        public bool IsBuildOrderComplete()
+        {
+            return CurrentBuildOrderIndex >= BuildOrderItems.Count;
+        }
+
+        /// <summary>
+        /// Inserts a Supply Depot build order if current supply is within 2 of max supply.
+        /// Avoids duplicate Supply Depot orders by checking:
+        /// 1. The next queued item
+        /// 2. Currently incomplete Supply Depots under construction
+        /// </summary>
+        public void InsertSupplyDepotIfLow(int currentSupply, int maxSupply)
+        {
+            // Only insert if we're within 2 of max supply but not already at max
+            if (currentSupply < maxSupply - 2 || currentSupply >= maxSupply)
+                return;
+
+            // Check if there's already a Supply Depot under construction
+            var player = GameAdapter.Self();
+            if (player.HasIncompleteUnitOfType(UnitType.Terran_Supply_Depot))
+                return;
+
+            // Find the next uncompleted step
+            var nextUncompletedIndex = FindNextUncompletedStep();
+            
+            // Let it be if the next item is already a Supply Depot
+            if (nextUncompletedIndex < BuildOrderItems.Count && 
+                BuildOrderItems[nextUncompletedIndex].UnitType == UnitType.Terran_Supply_Depot)
+            {
+                return;
+            }
+
+            // if not, insert right before the next uncompleted step
+            var supplyDepot = new BuildOrderItem { UnitType = UnitType.Terran_Supply_Depot };
+            BuildOrderItems.Insert(nextUncompletedIndex, supplyDepot);
+        }
+
+        /// <summary>
+        /// Inserts a build order item at the current index (for expansion or urgent builds).
+        /// </summary>
+        /// <param name="item">The BuildOrderItem to insert.</param>
+        public void InsertBuildOrderItemAtCurrentIndex(BuildOrderItem item)
+        {
+            BuildOrderItems.Insert(CurrentBuildOrderIndex, item);
         }
     }
+
+    public enum Strategy { Default, Aggressive, Defensive, Economic }
 }

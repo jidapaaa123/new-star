@@ -1,9 +1,13 @@
 using BWAPI.NET;
 using BWEM.NET;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Shared.Data;
+using Shared.DataAdapters;
 using Shared.Interfaces;
 using Shared.Models;
-using Shared.MyLogic;
+using Shared.Services;
+using Shared.Wrappers;
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Xml.Linq;
@@ -16,44 +20,84 @@ public class MyStarcraftBot : DefaultBWListener
 {
     private BWClient? _bwClient = null;
     private ILogger<MyStarcraftBot> _logger;
+    private IMatchRepository _matchRepository;
+    private IGameEventRepository _gameEventRepository;
 
+    public Match Match { get; set; } = new Match();
     public Game? Game => _bwClient?.Game;
-
     public bool IsRunning { get; private set; } = false;
     public bool InGame { get; private set; } = false;
     public int? GameSpeedToSet { get; set; } = null;
 
     public event Action? StatusChanged;
     public GameStrategy? Strategy { get; set; } = null;
-    public GameAdapter? GameAdapter => Game is null ? null : new GameAdapter(Game);
-    public PlayerAdapter? PlayerAdapter
+    public MyGame? MyGame => Game is null ? null : new MyGame(new GameData(Game));
+    public MyPlayer? MyPlayer
     {
         get
         {
             if (Game is null)
                 return null;
             Player self = Game.Self();
-            return new PlayerAdapter(self);
+            return new MyPlayer(new PlayerData(self));
         }
     }
     public IConstructionManager ConstructionManager { get; } = new ConstructionManager();
     public IProductionManager ProductionManager { get; } = new ProductionManager();
     public MapManager MapManager { get; private set; }
-    public List<ScoutLocation>? PotentialBases { get; private set; } = null;
+    public ScoutingManager? ScoutingManager { get; private set; }
+    public List<ScoutLocation>? PotentialBases => ScoutingManager?.PotentialBases;
 
-    public MyStarcraftBot(ILogger<MyStarcraftBot> logger)
+    public WorkerDispatcher WorkerDispatcher = new();
+
+    public MyStarcraftBot(ILogger<MyStarcraftBot> logger, IMatchRepository matchRepository, IGameEventRepository gameEventRepository)
     {
         _logger = logger;
+        _matchRepository = matchRepository;
+        _gameEventRepository = gameEventRepository;
+        _offenseTeamManager = new OffenseTeamManager();
     }
 
     private ConcurrentQueue<BotCommand> _pendingCommands = new();
-    public IMyUnit? ScoutUnit;
-    private int _scoutTargetIndex = 0;
-    private bool _scoutEnabled = true;
 
-    private HashSet<Unit> _offenseTeam = new HashSet<Unit>();
-    private bool _attackEnemyBaseEnabled = false;
+    private OffenseTeamManager _offenseTeamManager;
     private bool _botActive = true;
+    private TilePosition? _expandLocation = null;
+    private HashSet<TilePosition> _enemyFoundLocations = new();
+    private bool _supplyBlockedLogged = false;
+
+    /// <summary>
+    /// Gets the current game state for broadcasting to clients.
+    /// </summary>
+    public GameStateDto GetCurrentGameState()
+    {
+        int workerCount = MyPlayer?.GetWorkerUnits().Count ?? 0;
+        int militaryCount = MyPlayer?.GetUnits()
+            .Count(u => !u.GetUnitType().IsBuilding() && !u.GetUnitType().IsWorker()) ?? 0;
+        int minerals = MyPlayer?.Minerals() ?? 0;
+        int gas = MyPlayer?.Gas() ?? 0;
+        int supplyUsed = MyPlayer?.GetSupplyUsed() ?? 0;
+        int supplyTotal = MyPlayer?.SupplyTotal() ?? 0;
+        Strategy strategyMode = Strategy?.CurrentStrategy ?? Models.Strategy.Default;
+        bool hasExpanded = MyPlayer?.GetBases().Count > 1;
+        bool enemyScouted = PotentialBases?.Any(b => b.EnemyFound) ?? false;
+
+        return new GameStateDto
+        {
+            WorkerCount = workerCount,
+            MilitaryCount = militaryCount,
+            Minerals = minerals,
+            Gas = gas,
+            SupplyUsed = supplyUsed,
+            SupplyTotal = supplyTotal,
+            StrategyMode = strategyMode,
+            HasExpanded = hasExpanded,
+            EnemyScouted = enemyScouted,
+            IsRunning = IsRunning,
+            InGame = InGame,
+            LastUpdated = DateTime.UtcNow
+        };
+    }
 
     public void EnqueueCommand(BotCommand command)
     {
@@ -63,82 +107,122 @@ public class MyStarcraftBot : DefaultBWListener
 
     public void Connect()
     {
-        _bwClient = new BWClient(this);
-        var _ = Task.Run(() => _bwClient.StartGame());
-        IsRunning = true;
-        StatusChanged?.Invoke();
-    }
-
-    public void Disconnect()
-    {
-        if (_bwClient != null)
-        {
-            (_bwClient as IDisposable)?.Dispose();
-        }
-        _bwClient = null;
-        IsRunning = false;
-        InGame = false;
-        StatusChanged?.Invoke();
+         _bwClient = new BWClient(this);
+         IsRunning = true;
+         _bwClient.StartGame();
     }
 
     // Bot Callbacks below
     public override void OnStart()
     {
         InGame = true;
-        StatusChanged?.Invoke();
         Game?.EnableFlag(Flag.UserInput); // let human control too
 
         _logger.LogInformation("JIDAPA : Game Started");
 
+        // Create and save the match at the start of the game so events can be logged with a valid match ID
+        try
+        {
+            Match.StartTime = DateTime.UtcNow;
+            Match.Result = "Ongoing";
+            _matchRepository.CreateMatchAsync(Match).Wait();
+            _logger.LogInformation($"Match created with ID: {Match.Id}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create match at game start");
+        }
+
         SetDefaultStrategy();
-        SendText($"Hey! The game Began with {Strategy?.Name} Strategy! (from OnStart())");
+        LogGameEvent("start", $"Hey! The game Began with {Strategy?.Name} Strategy! (from OnStart())");
+        
+        if (Game is not null)
+        {
+            MapManager = new(new GameData(Game));
+            ScoutingManager = new ScoutingManager(new MyGame(new GameData(Game)), MapManager);
+            ScoutingManager.UpdateScouting(true);
+        }
+        
+
     }
 
     public override void OnEnd(bool isWinner)
     {
         InGame = false;
-        StatusChanged?.Invoke();
+
+        try
+        {
+            // Populate match end data
+            Match.EndTime = DateTime.UtcNow;
+            Match.Result = isWinner ? "Win" : "Loss";
+            Match.FinalWorkerCount = MyPlayer?.GetWorkerUnits().Count ?? 0;
+            Match.FinalMinerals = MyPlayer?.Minerals() ?? 0;
+            Match.FinalGas = MyPlayer?.Gas() ?? 0;
+            Match.FinalMilitaryCount = MyPlayer?.GetUnits().Count(u => u.GetUnitType().IsBuilding() == false && u.GetUnitType().IsWorker() == false) ?? 0;
+            Match.UpgradesCompleted = 0;
+
+            // Update the existing match (created in OnStart)
+            _matchRepository.UpdateMatchAsync(Match.Id, Match).Wait();
+            _logger.LogInformation("Match updated in database");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update match in database");
+        }
     }
 
     public override void OnFrame()
     {
         if (Game == null)
             return;
+        
+        HandleGameState();
+        UpdateDebugDisplay();
+        ProcessPendingCommands();
+        
+        if (!_botActive)
+            return;
+
+        ManageGameplay();
+    }
+
+    /// <summary>
+    /// Handles core game state: game speed and map initialization.
+    /// </summary>
+    private void HandleGameState()
+    {
         if (GameSpeedToSet != null)
         {
-            Game.SetLocalSpeed(GameSpeedToSet.Value);
+            Game!.SetLocalSpeed(GameSpeedToSet.Value);
             GameSpeedToSet = null;
         }
 
         if (MapManager is null || !MapManager.IsInitialized)
-            MapManager = new(Game);
+            MapManager = new(new GameData(Game!));
+    }
 
-        TilePosition ccTile = PlayerAdapter?.GetBases().FirstOrDefault()?.GetTilePosition() ?? TilePosition.None;
+    /// <summary>
+    /// Updates all debug visualization on screen.
+    /// </summary>
+    private void UpdateDebugDisplay()
+    {
+        Game!.DrawTextScreen(100, 130, $"Supply: {MyPlayer?.GetSupplyUsed()} / {MyPlayer?.SupplyTotal()}");
+        Game!.DrawTextScreen(100, 140, $"OtherBases: {PotentialBases?.Count}");
+        Game!.DrawTextScreen(100, 150, $"ScoutUnitNull?: {ScoutingManager?.ScoutUnit is null}");
+        Game!.DrawTextScreen(100, 160, $"Current Strategy: {Strategy?.CurrentStrategy}");
+        Game!.DrawTextScreen(100, 170, $"Gas Gatherers: {Strategy?.GasGatherConfig} | Min Minerals: {Strategy?.MinimumMineralGatherConfig}");
+        Game!.DrawTextScreen(100, 190, $"Construction Queued: {ConstructionManager.PendingConstructionOrder is not null}");
+        Game!.DrawTextScreen(100, 200, $"Build Order Index: {Strategy?.CurrentBuildOrderIndex}");
+        Game!.DrawTextScreen(100, 210, $"Build Order Type: {ConstructionManager.PendingConstructionOrder?.BuildingType}");
+    }
 
-        Game.DrawTextScreen(100, 130, $"Supply: {PlayerAdapter.GetSupplyUsed()} / {PlayerAdapter.SupplyTotal()}");
-        Game.DrawTextScreen(100, 140, $"OtherBases: {PotentialBases?.Count}");
-        Game.DrawTextScreen(100, 150, $"ScoutUnitNull?: {ScoutUnit is null}");
-        if (ScoutUnit is not null) Game.DrawTextScreen(100, 160, $"ScoutUnitAvailable: {HelperLogic.IsAvailable(ConstructionManager, ScoutUnit)}");
-        if (ScoutUnit is not null) Game.DrawTextScreen(100, 170, $"IsScouting: {ScoutUnit.IsScouting()}");
-        Game.DrawTextScreen(100, 190, $"Construction Queue: {ConstructionManager.PendingConstructionOrders.Count}");
-        Game.DrawTextScreen(100, 200, $"SCV Config: {Strategy?.SCVConfig ?? -999}");
-
-
-
-        // Check if the API dropped anything in the mailbox
+    /// <summary>
+    /// Processes all pending commands from the command queue.
+    /// </summary>
+    private void ProcessPendingCommands()
+    {
         while (_pendingCommands.TryDequeue(out var command))
         {
-            bool buildOrderIncomplete =
-                Strategy is not null &&
-                Strategy.CurrentBuildOrderIndex < Strategy.BuildOrderItems.Count;
-
-            if (buildOrderIncomplete && (command.Type == BotCommandType.ManageBunkerProduction
-                                        || command.Type == BotCommandType.ManageSupplyDepotProduction))
-            {
-                SendText("Cannot process ChokepointBuildings command while build order is incomplete.");
-                break;
-            }
-
             switch (command.Type)
             {
                 case BotCommandType.ManageBunkerProduction:
@@ -150,75 +234,134 @@ public class MyStarcraftBot : DefaultBWListener
                 case BotCommandType.ToggleStrategy:
                     ToggleStrategy();
                     break;
+                case BotCommandType.ChangeStrategy:
+                    if (command.StrategyType.HasValue && Strategy != null)
+                    {
+                        Strategy.ChangeStrategy(command.StrategyType.Value);
+                    }
+                    break;
                 case BotCommandType.ToggleAttackEnemyBase:
-                    _attackEnemyBaseEnabled = !_attackEnemyBaseEnabled;
+                    _offenseTeamManager.ToggleAttackMode();
                     break;
                 case BotCommandType.ScoutMap:
-                    _scoutEnabled = true;
-                    SendText("Scouting enabled.");
+                    ScoutingManager?.UpdateScouting(true);
                     break;
                 case BotCommandType.TogglePauseBot:
                     _botActive = !_botActive;
                     break;
+                case BotCommandType.Expand:
+                    OnExpand();
+                    break;
             }
         }
+    }
 
-        if (!_botActive)
-            return;
-
-        if (_scoutEnabled)
-            UpdateScouting();
-
-        if (ScoutUnit != null)
-        {
-            Game.DrawCircleMap(ScoutUnit.GetPosition().x, ScoutUnit.GetPosition().y, 8, Color.Blue, true);
-        }
-
-        int? id = ConstructionManager.GetPendingWorkerId();
-        if (id != null)
-        {
-            var worker = PlayerAdapter?.GetWorkerUnits().First(u => u.GetID() == id.Value);
-            var position = worker.GetPosition();
-            Game.DrawCircleMap(position.x, position.y, 16, Color.Red, true);
-            Game.DrawTextScreen(100, 90, $"Worker Order: {worker.GetOrder()}");
-            Game.DrawTextScreen(100, 100, $"Worker Target: {worker.GetOrderTarget()}");
-            Game.DrawTextScreen(100, 110, $"IsAvailable: {HelperLogic.IsAvailable(ConstructionManager, worker)}");
-            Game.DrawTextScreen(100, 120, $"IsScout: {worker.IsScouting()}");
-
-
-            if (worker.GetOrder() != Order.PlaceBuilding)
-            {
-                ConstructionManager.RecalibrateWorker();
-            }
-        }
-
+    /// <summary>
+    /// Manages all active gameplay: scouting, construction, production, and build orders.
+    /// </summary>
+    private void ManageGameplay()
+    {
+        ManageScouting();
+        ManageConstructionWorker();
+        
         if (Strategy == null || Strategy.IsPaused)
             return;
 
+        ManageStrategy();
+    }
 
+    /// <summary>
+    /// Manages scouting: updates scout targets and visualizes scout unit.
+    /// </summary>
+    private void ManageScouting()
+    {
+        if (ScoutingManager is null)
+            return;
+
+        ScoutingManager.UpdateScouting(ScoutingManager.IsScoutingEnabled);
+
+        if (ScoutingManager.ScoutUnit != null)
+        {
+            Game!.DrawCircleMap(ScoutingManager.ScoutUnit.GetPosition().x, ScoutingManager.ScoutUnit.GetPosition().y, 8, Color.Blue, true);
+        }
+
+        // Check if enemy was just scouted
+        if (ScoutingManager.PotentialBases != null)
+        {
+            foreach (var location in ScoutingManager.PotentialBases)
+            {
+                if (location.EnemyFound && !_enemyFoundLocations.Contains(location.TilePosition))
+                {
+                    _enemyFoundLocations.Add(location.TilePosition);
+                    LogGameEvent("scout", $"Enemy found at location ({location.TilePosition.X}, {location.TilePosition.Y})");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Manages construction worker: recalibrates if needed and visualizes worker debug info.
+    /// </summary>
+    private void ManageConstructionWorker()
+    {
+        int? id = ConstructionManager.PendingConstructionOrder?.Worker.GetID();
+        if (id == null)
+            return;
+
+        var worker = MyPlayer?.GetWorkerUnits().FirstOrDefault(u => u.GetID() == id.Value);
+        if (worker == null)
+            return;
+
+        var position = worker.GetPosition();
+        Game!.DrawCircleMap(position.x, position.y, 16, Color.Red, true);
+        Game!.DrawTextScreen(100, 90, $"Worker Order: {worker.GetOrder()}");
+        Game!.DrawTextScreen(100, 100, $"Target Type: {ConstructionManager.PendingConstructionOrder.BuildingType}");
+        Game!.DrawTextScreen(100, 120, $"IsScout: {worker.IsScouting()}");
+
+        // Recalibrate worker if they're not placing a building
+        if (worker.GetOrder() != Order.PlaceBuilding)
+        {
+            ConstructionManager.RecalibrateWorker(new GameData(Game));
+        }
+    }
+
+    /// <summary>
+    /// Manages strategy execution: worker assignment, production, and build orders.
+    /// </summary>
+    private void ManageStrategy()
+    {
         if (Strategy.IdleWorkersSentToGatherMaterials)
         {
             orderIdleUnitsToGatherMaterials();
         }
 
-        ProductionManager.ConfigTrainSCV(GameAdapter, PlayerAdapter, ConstructionManager, Strategy);
-        ProductionManager.ConfigTrainMarine(GameAdapter, PlayerAdapter, ConstructionManager, Strategy);
-        ProductionManager.ConfigTrainVulture(GameAdapter, PlayerAdapter, ConstructionManager, Strategy);
-        ProductionManager.DefaultTrainWraith(GameAdapter, PlayerAdapter, ConstructionManager);
+        // Check if supply is low and insert Supply Depot if needed
+        int currentSupply = MyPlayer?.GetSupplyUsed() ?? 0;
+        int maxSupply = MyPlayer?.SupplyTotal() ?? 0;
+        
+        // Log supply blocked event
+        if (currentSupply >= maxSupply && !_supplyBlockedLogged)
+        {
+            _supplyBlockedLogged = true;
+            LogGameEvent("supply_blocked", $"Supply blocked at {currentSupply}/{maxSupply}");
+        }
+        else if (currentSupply < maxSupply)
+        {
+            _supplyBlockedLogged = false;
+        }
+        
+        Strategy.InsertSupplyDepotIfLow(currentSupply, maxSupply);
 
+        // Manage unit production
+        ProductionManager.ConfigTrainType(UnitType.Terran_SCV, MyGame, ConstructionManager, Strategy);
+        ProductionManager.ConfigTrainType(UnitType.Terran_Marine, MyGame, ConstructionManager, Strategy);
+        ProductionManager.ConfigTrainType(UnitType.Terran_Vulture, MyGame, ConstructionManager, Strategy);
+        ProductionManager.DefaultTrainWraith(MyGame, MyPlayer, ConstructionManager);
 
-        if (ConstructionManager.PendingConstructionOrders.Count == 0)
+        // Advance build order if nothing is being constructed
+        if (ConstructionManager.PendingConstructionOrder is null)
         {
             TryAdvanceBuildOrder();
-        }
-
-        if (_attackEnemyBaseEnabled)
-        {
-            AttackEnemyBase();
-        }
-        else
-        {
-            ManageAndRallyOffenseTeam();
         }
     }
 
@@ -262,105 +405,52 @@ public class MyStarcraftBot : DefaultBWListener
 
     public void ManageAndRallyOffenseTeam()
     {
-        if (MapManager == null)
+        if (MapManager == null || Game == null)
         {
             return;
         }
 
-        ManageOffenseTeam();
-        _logger.LogInformation($"Offense Team Size: {_offenseTeam.Count}");
-        ChokePoint? choke = MapManager.GetMainChokepoint();
-        if (choke is null)
-        {
-            _logger.LogInformation($"Offense Team Size: {_offenseTeam.Count}");
-            return;
-        }
-
-        Position rallyPoint = choke.Center.ToPosition();
-        var cc = PlayerAdapter?.GetBases()[0];
-
-        foreach (var u in _offenseTeam) 
-        {
-            if (u.IsSelected())
-            {
-                continue;
-            }
-            if (u.GetDistance(rallyPoint) > 32) // Only move if not already there
-            {
-                u.Attack(rallyPoint);
-                // Draw a line from the unit to where it's TRYING to go
-                Game.DrawLineMap(u.GetPosition(), rallyPoint, Color.Green);
-            }
-        }
+        _offenseTeamManager.ManageTeam(Game, MyPlayer);
+        _logger.LogInformation($"Offense Team Size: {_offenseTeamManager.TeamSize}");
+        _offenseTeamManager.RallyAtChokepoint(Game, MapManager);
     }
 
     /// <summary>
-    /// Conditionally... of course
+    /// Conditionally command the offense team to attack the enemy base.
     /// </summary>
     public void AttackEnemyBase()
     {
-        if (Game is null || PlayerAdapter is null)
+        if (Game is null || MyPlayer is null)
             return;
 
-        if (PotentialBases is null)
+        _offenseTeamManager.AttackEnemyBase(Game, MyPlayer, PotentialBases);
+    }
+
+    public void OnExpand()
+    {
+        if (Game is null || MyPlayer is null || MapManager is null || Strategy is null)
+            return;
+
+        var naturalExpansion = MapManager.GetNaturalExpansion();
+        if (naturalExpansion is null)
         {
-            SendText("No potential bases known.");
             return;
         }
 
-        ScoutLocation? enemyBase = PotentialBases.FirstOrDefault(b => b.EnemyFound);
+        // Store the expansion location
+        _expandLocation = naturalExpansion.Value;
 
-        if (enemyBase is null)
-        {
-            SendText("No enemy base found during scouting yet.");
-            return;
-        }
+        // Create a Command Center build order item and insert it at the current position
+        var expandItem = new BuildOrderItem 
+        { 
+            UnitType = UnitType.Terran_Command_Center, 
+            TechType = TechType.None 
+        };
 
-        var team = _offenseTeam;
-        // "A-Move" to the enemy base
-        foreach (var u in team)
-        {
-            u.Attack(enemyBase.TilePosition.ToPosition());
-        }
-
-        var enemies = Game.Enemy().GetUnits();
-        if (enemies.Any())
-        {
-            foreach (var u in team)
-            {
-                if (u.CanCloak())
-                {
-                    u.Cloak();
-                }
-                u.Attack(enemies[0]);
-            }
-        }
-
-        if (team.Any(u => u.GetHitPoints() < u.GetHitPoints() * 0.5))
-        {
-            _attackEnemyBaseEnabled = false;
-            foreach (var u in team)
-            {
-                u.Attack(Game.Self().GetStartLocation().ToPosition());
-            }
-
-            return;
-        }
-        // Threshold: 15 energy (enough to stay cloaked for a few more seconds)
-        int energyThreshold = 15;
-
-        if (team.Any(u => u.IsCloaked() && u.GetEnergy() < energyThreshold))
-        {
-            _attackEnemyBaseEnabled = false;
-            foreach (var u in team)
-            {
-                if (u.CanCloak())
-                {
-                    u.Decloak();
-                }
-                u.Attack(Game.Self().GetStartLocation().ToPosition());
-            }
-        }
+        Strategy.InsertBuildOrderItemAtCurrentIndex(expandItem);
+        
+        // Log expansion event
+        LogGameEvent("expansion", $"Expansion started at position ({naturalExpansion.Value.X}, {naturalExpansion.Value.Y})");
     }
 
     public void ManageOffenseTeam()
@@ -368,100 +458,14 @@ public class MyStarcraftBot : DefaultBWListener
         if (Game is null)
             return;
 
-        // Clean up dead units
-        _offenseTeam.RemoveWhere(u => !u.Exists() || u.GetHitPoints() <= 0);
-
-        // Recruit units: ALL wraiths, ALL vultures, keep marines at home for now?
-        // Should put this in config with Strategy... should I be clean or should I be fast?
-        // It's 4 hours before it's due, I think I'll be fast
-        // The Game
-        var allWraiths = Game.Self().GetUnits()
-            .Where(u => u.GetUnitType() == UnitType.Terran_Wraith);
-        var allVultures = Game.Self().GetUnits()
-            .Where(u => u.GetUnitType() == UnitType.Terran_Vulture);
-        var allMarines = Game.Self().GetUnits()
-            .Where(u => u.GetUnitType() == UnitType.Terran_Marine);
-
-        foreach (var w in allWraiths) _offenseTeam.Add(w);
-        foreach (var v in allVultures) _offenseTeam.Add(v);
-        foreach (var m in allMarines) _offenseTeam.Add(m);
-    }
-
-    public void UpdateScouting()
-    {
-        if (Game is null || PlayerAdapter is null)
-            return;
-
-        if (PotentialBases is null)
-            PotentialBases = MapManager.GetScoutingTargets().Select(p => new ScoutLocation(p)).ToList();
-
-        if (!tryEnsureScoutUnitIsSet(PlayerAdapter)) 
-            return;
-
-        if (Game.Enemy().GetUnits().Any())
-        {
-            PotentialBases[_scoutTargetIndex].IsExplored = true;
-            PotentialBases[_scoutTargetIndex].EnemyFound= true;
-
-            proceedToNextScoutingLocation(PotentialBases);
-            return;
-        }
-
-        Position targetPosition = PotentialBases[_scoutTargetIndex].TilePosition.ToPosition();
-        bool reachedTarget = ScoutUnit.GetDistance(targetPosition) <= 200;
-
-        if (!reachedTarget)
-        {
-            ScoutUnit.Move(targetPosition);
-        }
-        else
-        {
-            PotentialBases[_scoutTargetIndex].IsExplored = true;
-            PotentialBases[_scoutTargetIndex].EnemyFound = false;
-
-            proceedToNextScoutingLocation(PotentialBases);
-        }
-    }
-
-    private bool tryEnsureScoutUnitIsSet(IMyPlayer player)
-    {
-        if (ScoutUnit == null)
-        {
-            ScoutUnit = player.GetWorkerUnits().FirstOrDefault(u => HelperLogic.IsAvailable(ConstructionManager, u));
-            ScoutUnit?.SetScouting();
-        }
-        
-        return ScoutUnit != null;
-    }
-
-    private void proceedToNextScoutingLocation(List<ScoutLocation> locations)
-    {
-        if (Game is null || ScoutUnit is null)
-            return;
-
-        int nextIndex = locations.FindIndex(s => !s.IsExplored);
-        bool notFound = nextIndex == -1;
-
-        if (notFound)
-        {
-            SendText("Scouting complete. I better get going home!");
-            Position home = Game.Self().GetStartLocation().ToPosition();
-            ScoutUnit.Move(home);
-            ScoutUnit.UnsetScouting();
-            ScoutUnit = null;
-            _scoutEnabled = false;
-        }
-        else
-        {
-            _scoutTargetIndex = nextIndex;
-        }
+        _offenseTeamManager.ManageTeam(Game, MyPlayer);
     }
 
     public void SetDefaultStrategy()
     {
         if (Game is null)
             return;
-        Strategy = new(new GameAdapter(Game));
+        Strategy = new(new MyGame(new GameData(Game)));
     }
 
     /// <summary>
@@ -470,36 +474,52 @@ public class MyStarcraftBot : DefaultBWListener
     /// </summary>
     public void TryAdvanceBuildOrder()
     {
-        if (Game == null || PlayerAdapter == null || GameAdapter == null)
+        if (Game == null || MyPlayer == null || MyGame == null)
             return;
         if (Strategy is null)
             return;
 
-        int nextIndex = Strategy.CurrentBuildOrderIndex;
-        var buildOrder = Strategy.BuildOrderItems;
-        if (nextIndex >= buildOrder.Count)
+        var nextBuildItem = Strategy.GetCurrentBuildOrderItem();
+        if (nextBuildItem == null)
             return;
 
-        var nextBuildItem = buildOrder[nextIndex];
         UnitType targetType = nextBuildItem.UnitType;
+        TechType techType = nextBuildItem.TechType;
+        bool isResearch = techType != TechType.None;
 
-        bool inProgress = OnConstructCommand(targetType, Strategy.InitialPosition, Strategy.MaxRange, true);
+        // Use expansion location for Command Centers, otherwise use strategy's initial position
+        TilePosition initialPosition = targetType == UnitType.Terran_Command_Center && _expandLocation.HasValue
+            ? _expandLocation.Value
+            : Strategy.InitialPosition;
+
+        bool inProgress = isResearch ?
+              OnResearchCommand(techType)
+            : OnConstructCommand(targetType, initialPosition, Strategy.MaxRange, true);
         if (inProgress)
         {
             _logger.LogInformation($"Build{targetType} in progress...");
             
-            if (!targetType.IsAddon())
+            if (!(targetType.IsAddon() || isResearch))
             {
                 Strategy.SetWorkerAssignedToCurrentStep();
             }
         }
     }
 
+    public bool OnResearchCommand(TechType techType)
+    {
+        bool researching = MyPlayer.TryResearch(techType, ConstructionManager);
+        if (researching)
+        {
+            Strategy?.CompletedBuildOrderStep();
+            LogGameEvent("upgrade", $"Research started: {techType}");
+        }
+        return researching;
+    }
 
     public bool OnConstructCommand(UnitType targetType, TilePosition desiredPosition, int maxRange, bool isFromBuildOrder)
     {
-        _logger.LogInformation($"Command to Build{targetType}");
-        if (Game == null || PlayerAdapter == null || GameAdapter == null)
+        if (Game == null || MyPlayer == null || MyGame == null)
             return false;
 
         if (Strategy is not null && Strategy.WorkerAssignedToCurrentStep)
@@ -507,8 +527,8 @@ public class MyStarcraftBot : DefaultBWListener
             return false;
         }
 
-        TilePosition buildLocation = GameAdapter.GetBuildLocation(targetType, desiredPosition, maxRange);
-        var invalidPositionTypes = HelperLogic.InvalidPositionTypes();
+        TilePosition buildLocation = MyGame.GetBuildLocation(targetType, desiredPosition, maxRange);
+        var invalidPositionTypes = StaticGameInfo.InvalidPositionTypes();
 
         if (invalidPositionTypes.Contains(buildLocation))
         {
@@ -517,7 +537,7 @@ public class MyStarcraftBot : DefaultBWListener
         else
         {
 
-            bool success = PlayerAdapter.TryConstruct(ConstructionManager, targetType, buildLocation, isFromBuildOrder);
+            bool success = MyPlayer.TryConstruct(ConstructionManager, targetType, buildLocation, isFromBuildOrder);
             if (success && targetType.IsAddon() && isFromBuildOrder)
             {
                 Strategy?.CompletedBuildOrderStep();
@@ -529,10 +549,9 @@ public class MyStarcraftBot : DefaultBWListener
 
     public void SendText(string text)
     {
-        _logger.LogInformation("SendText called");
         if (Game == null)
             return;
-        var gameAdapter = new GameAdapter(Game);
+        var gameAdapter = new MyGame(new GameData(Game));
         gameAdapter.SendText(text);
     }
 
@@ -543,23 +562,23 @@ public class MyStarcraftBot : DefaultBWListener
 
     public override void OnUnitDestroy(Unit unit) 
     {
-        if (Game == null || PlayerAdapter == null)
+        if (Game == null || MyPlayer == null)
             return;
 
         bool wasAWorker = unit.GetUnitType().IsWorker();
         bool wasAlly = unit.GetPlayer() == Game.Self();
-        bool wasInConstructionOrder = ConstructionManager.PendingConstructionOrders.Any(o => o.Worker?.GetID() == unit.GetID());
+        bool isInConstructionOrder = ConstructionManager.PendingConstructionOrder?.Worker.GetID() == unit.GetID();
 
-        if (wasAWorker && wasAlly && wasInConstructionOrder)
+        if (wasAWorker && wasAlly && isInConstructionOrder)
         {
-            var workerAdapter = new UnitAdapter(unit);
-            ConstructionManager.RemoveWorkerConstructionOrder(workerAdapter);
+            var workerAdapter = new MyUnit(unit);
+            ConstructionManager.RemovePendingConstructionOrder();
         }
     }
 
     public override void OnUnitMorph(Unit unit)
     {
-        if (Game == null || PlayerAdapter == null)
+        if (Game == null || MyPlayer == null)
             return;
 
         bool isRefinery = unit.GetUnitType() == UnitType.Terran_Refinery;
@@ -588,7 +607,7 @@ public class MyStarcraftBot : DefaultBWListener
 
     public override void OnUnitCreate(Unit unit) 
     {
-        if (Game == null || PlayerAdapter == null)
+        if (Game == null || MyPlayer == null)
             return;
 
         bool isABuilding = unit.GetUnitType().IsBuilding();
@@ -603,11 +622,11 @@ public class MyStarcraftBot : DefaultBWListener
 
     private IMyUnit? workerUnitOfThisBuildSite(Unit buildSite)
     {
-        if (Game == null || PlayerAdapter == null)
+        if (Game == null || MyPlayer == null)
             return null;
 
         bool isAssignedWorker(IMyUnit w) => w.GetOrderTarget()?.GetID() == buildSite.GetID();
-        return PlayerAdapter
+        return MyPlayer
                 .GetWorkerUnits()
                 .FirstOrDefault(isAssignedWorker);
     }
@@ -622,10 +641,10 @@ public class MyStarcraftBot : DefaultBWListener
 
         if (worker != null)
         {
-            var order = ConstructionManager.OrderOfWorker(worker);
+            var order = ConstructionManager.PendingConstructionOrder;
             if (order is null)
             {
-                SendText($"Player ordered {buildSite.GetUnitType()}");
+                //SendText($"Player ordered {buildSite.GetUnitType()}");
                 return;
             }
 
@@ -633,43 +652,42 @@ public class MyStarcraftBot : DefaultBWListener
             {
                 Strategy!.CompletedBuildOrderStep();
                 _logger.LogInformation($"Build order advanced to index {Strategy.CurrentBuildOrderIndex}");
-                ConstructionManager.RemoveWorkerConstructionOrder(worker);
+                ConstructionManager.RemovePendingConstructionOrder();
             }
         }
         else
         {
-            throw new NullReferenceException("Assigned worker for construction not found???");
+            throw new NullReferenceException("Worker for construction site not found???");
         }
     }
 
     private void orderIdleUnitsToGatherMaterials()
     {
-        if (Game == null || PlayerAdapter == null || GameAdapter == null)
+        if (Game == null || MyGame == null || Strategy == null)
             return;
 
+        WorkerDispatcher.OrderIdleUnitsToGatherMaterials(MyGame, ConstructionManager, Strategy);
+    }
 
-        var bases = PlayerAdapter.GetBases();
-        var nearestMineral = GameAdapter.ClosestInstanceOfTo(GameAdapter.GetMinerals(), bases[0]);
-        var availableWorkers = PlayerAdapter.GetWorkerUnits().Where(u => HelperLogic.IsAvailable(ConstructionManager, u)).ToList();
-
-        if (availableWorkers.Count == 0)
-            return;
-
-        PlayerAdapter.SendTheseWorkersToGatherAt(ConstructionManager, availableWorkers, nearestMineral);
-
-        IMyUnit? refinery = PlayerAdapter.GetUnits().Where(u => u.GetUnitType().IsRefinery() && !u.IsConstructing()).FirstOrDefault() ?? null;
-
-        bool hasRefinery = refinery != null;
-        int gasConfig = Strategy?.GasGatherConfig ?? HelperLogic.GasGatherConfigDefault;
-        int gasWorkersAmt = hasRefinery ? gasConfig : 0;
-        int mineralWorkersAmt = availableWorkers.Count - gasWorkersAmt;
-
-        List<IMyUnit> gasWorkers = availableWorkers.GetRange(0, gasWorkersAmt);
-        List<IMyUnit> mineralWorkers = availableWorkers.GetRange(gasWorkersAmt, mineralWorkersAmt);
-
-        if (hasRefinery)
+    /// <summary>
+    /// Logs a game event to the database asynchronously.
+    /// </summary>
+    private async void LogGameEvent(string eventType, string description)
+    {
+        try
         {
-            PlayerAdapter.SendTheseWorkersToGatherAt(ConstructionManager, gasWorkers, refinery!);
+            var gameEvent = new GameEvent
+            {
+                MatchId = Match.Id,
+                Timestamp = DateTime.UtcNow,
+                EventType = eventType,
+                Description = description
+            };
+            await _gameEventRepository.CreateGameEventAsync(gameEvent);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, $"Failed to log game event: {eventType}");
         }
     }
 
